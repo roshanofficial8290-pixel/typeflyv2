@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { recordSessionForBadges } from "@/lib/badges";
 
 export type TestResult = {
   mode: "bird" | "beginner";
@@ -24,13 +25,16 @@ export function saveResult(result: TestResult, userId?: string | null) {
   // Save for immediate results page display
   window.sessionStorage.setItem(LAST_RESULT_KEY, JSON.stringify(result));
 
-  // Save to persistent local history
+  // Save to persistent local history and record lifetime milestone badges
   try {
     const raw = window.localStorage.getItem(HISTORY_KEY);
     const history: TestResult[] = raw ? JSON.parse(raw) : [];
     history.unshift(result);
     // Keep last 50 games
     window.localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 50)));
+
+    // Track lifetime badges & milestones (e.g. 1000 Words Typed, Perfect Accuracy Session)
+    recordSessionForBadges(result, history);
   } catch (err) {
     console.warn("Failed to write game history to localStorage", err);
   }

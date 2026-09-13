@@ -1,10 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SiteLayout } from "@/components/SiteLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { getUserStats, loadHistory, type TestResult } from "@/lib/results";
+import { BadgesSection } from "@/components/BadgesSection";
+import { getAllBadgesWithStatus } from "@/lib/badges";
 import birdImg from "@/assets/bird.png";
+import { Award, LogIn, Sparkles, UserCheck } from "lucide-react";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({
@@ -59,6 +62,7 @@ function ProfilePage() {
   }, [user]);
 
   const stats = getUserStats(history);
+  const { earnedCount, totalCount } = useMemo(() => getAllBadgesWithStatus(history), [history]);
 
   if (loading) {
     return (
@@ -68,7 +72,8 @@ function ProfilePage() {
     );
   }
 
-  if (!user) {
+  // If not logged in and no local flights exist, show sign-in prompt
+  if (!user && history.length === 0) {
     return (
       <SiteLayout>
         <div className="mx-auto max-w-md px-4 py-16 text-center">
@@ -83,7 +88,8 @@ function ProfilePage() {
             Sign in to view your profile
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Save your WPM records, track combos, and keep your full flight history.
+            Save your WPM records, track combos, earn milestone badges, and keep your full flight
+            history.
           </p>
           <div className="mt-5 flex justify-center gap-3">
             <Link to="/auth" className="btn-primary">
@@ -101,6 +107,25 @@ function ProfilePage() {
   return (
     <SiteLayout>
       <div className="mx-auto w-full max-w-4xl px-4 py-10">
+        {/* Guest Banner if not signed in */}
+        {!user && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/10 p-4 text-sm">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xl">🪶</span>
+              <div>
+                <p className="font-bold text-foreground">Guest Aviator Mode</p>
+                <p className="text-xs text-muted-foreground">
+                  Your badges, words typed, and flight stats are currently saved in this browser.
+                </p>
+              </div>
+            </div>
+            <Link to="/auth" className="btn-primary text-xs flex items-center gap-1.5">
+              <LogIn className="h-3.5 w-3.5" />
+              Sign in to Cloud Sync
+            </Link>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <img
@@ -112,9 +137,11 @@ function ProfilePage() {
             />
             <div>
               <h1 className="font-display text-3xl font-extrabold">
-                {profile?.display_name || name || "Aviator"}
+                {user ? profile?.display_name || name || "Aviator" : "Guest Aviator"}
               </h1>
-              <p className="text-sm text-muted-foreground">{user.email}</p>
+              <p className="text-sm text-muted-foreground">
+                {user ? user.email : "Local pilot session on this device"}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -125,58 +152,70 @@ function ProfilePage() {
                   : "bg-muted text-muted-foreground"
               }`}
             >
-              {profile?.is_premium ? "✨ Premium Aviator" : "Free Plan"}
+              {profile?.is_premium ? "✨ Premium Aviator" : user ? "Free Plan" : "Guest Pilot"}
             </span>
-            <button onClick={signOut} className="btn-ghost text-xs">
-              Sign out
-            </button>
+            {user ? (
+              <button onClick={signOut} className="btn-ghost text-xs">
+                Sign out
+              </button>
+            ) : (
+              <Link to="/auth" className="btn-ghost text-xs">
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
 
         {/* Career Stats Grid */}
-        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
           <StatCard label="Best Speed" value={`${stats.bestWpm} WPM`} highlight />
           <StatCard label="Avg Accuracy" value={`${stats.averageAccuracy}%`} />
           <StatCard label="Highest Combo" value={`x${stats.bestCombo}`} />
-          <StatCard label="Flights Taken" value={String(stats.totalFlights)} />
+          <StatCard label="Words Typed" value={stats.totalWords.toLocaleString()} />
+          <StatCard label="Badges Earned" value={`${earnedCount} / ${totalCount}`} highlight />
         </div>
 
-        {/* Profile Settings Panel */}
-        <div className="panel mt-6 p-6">
-          <h2 className="font-display text-xl font-bold">Pilot Settings</h2>
-          <div className="mt-4 flex flex-wrap items-end gap-3">
-            <label className="flex-1 min-w-[200px] text-sm font-bold">
-              Display name
-              <input
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  setSaved(false);
+        {/* Lifetime Badges & Milestones Section */}
+        <BadgesSection history={history} />
+
+        {/* Profile Settings Panel (only for signed-in users) */}
+        {user && (
+          <div className="panel mt-8 p-6">
+            <h2 className="font-display text-xl font-bold">Pilot Settings</h2>
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="flex-1 min-w-[200px] text-sm font-bold">
+                Display name
+                <input
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setSaved(false);
+                  }}
+                  className="mt-1 w-full rounded-xl border-2 border-input bg-muted px-3 py-2 outline-none focus:border-primary"
+                />
+              </label>
+              <button
+                onClick={async () => {
+                  await supabase.from("profiles").upsert({ id: user.id, display_name: name });
+                  setSaved(true);
                 }}
-                className="mt-1 w-full rounded-xl border-2 border-input bg-muted px-3 py-2 outline-none focus:border-primary"
-              />
-            </label>
-            <button
-              onClick={async () => {
-                await supabase.from("profiles").upsert({ id: user.id, display_name: name });
-                setSaved(true);
-              }}
-              className="btn-primary"
-            >
-              Save Name
-            </button>
-          </div>
-          {saved && <p className="mt-2 text-sm font-bold text-green-600">Saved successfully!</p>}
-
-          {!profile?.is_premium && (
-            <div className="mt-4 flex items-center justify-between rounded-xl bg-accent/30 p-3 text-sm">
-              <span>Ready for custom flight lengths and unlimited lessons?</span>
-              <Link to="/pricing" className="btn-accent text-xs">
-                Unlock Premium
-              </Link>
+                className="btn-primary"
+              >
+                Save Name
+              </button>
             </div>
-          )}
-        </div>
+            {saved && <p className="mt-2 text-sm font-bold text-green-600">Saved successfully!</p>}
+
+            {!profile?.is_premium && (
+              <div className="mt-4 flex items-center justify-between rounded-xl bg-accent/30 p-3 text-sm">
+                <span>Ready for custom flight lengths and unlimited lessons?</span>
+                <Link to="/pricing" className="btn-accent text-xs">
+                  Unlock Premium
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Flight History */}
         <div className="mt-8">

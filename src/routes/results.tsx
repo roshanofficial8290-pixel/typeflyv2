@@ -2,8 +2,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { SiteLayout } from "@/components/SiteLayout";
 import { loadResult, performanceSummary, type TestResult } from "@/lib/results";
+import type { Badge } from "@/lib/badges";
 import { useAuth } from "@/hooks/useAuth";
 import birdImg from "@/assets/bird.png";
+import { Award, Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/results")({
   head: () => ({
@@ -49,9 +51,22 @@ function formatDuration(seconds: number) {
 function ResultsPage() {
   const { user } = useAuth();
   const [result, setResult] = useState<TestResult | null>(null);
+  const [recentBadges, setRecentBadges] = useState<Badge[]>([]);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => setResult(loadResult()), []);
+  useEffect(() => {
+    setResult(loadResult());
+    try {
+      const raw = window.sessionStorage.getItem("typefly-recent-badges");
+      if (raw) {
+        setRecentBadges(JSON.parse(raw));
+        // Clear after reading so it only shows once
+        window.sessionStorage.removeItem("typefly-recent-badges");
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const tier = result ? getSpeedTier(result.wpm) : null;
 
@@ -100,6 +115,38 @@ function ResultsPage() {
           </div>
         ) : (
           <>
+            {/* New Milestones Unlocked Banner */}
+            {recentBadges.length > 0 && (
+              <div className="mt-6 rounded-2xl border-2 border-amber-400/80 bg-gradient-to-r from-amber-500/15 via-primary/10 to-amber-500/15 p-4 shadow-lg shadow-amber-500/10">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-background/80 text-2xl shadow-inner animate-bounce">
+                      🏆
+                    </span>
+                    <div>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                        <Sparkles className="h-3 w-3" />
+                        Milestone Unlocked!
+                      </span>
+                      <p className="font-display text-lg font-extrabold text-foreground">
+                        {recentBadges.map((b) => b.name).join(" • ")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {recentBadges[0]?.description}
+                      </p>
+                    </div>
+                  </div>
+                  <Link
+                    to="/profile"
+                    className="btn-primary text-xs flex items-center gap-1.5 shadow"
+                  >
+                    <Award className="h-3.5 w-3.5" />
+                    View in Profile →
+                  </Link>
+                </div>
+              </div>
+            )}
+
             <div className="panel mt-6 flex flex-wrap items-center gap-6 p-6 sm:p-8">
               <img
                 src={birdImg}

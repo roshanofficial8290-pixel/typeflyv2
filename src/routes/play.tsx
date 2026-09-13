@@ -3,11 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { SiteLayout } from "@/components/SiteLayout";
 import { MuteButton } from "@/components/MuteButton";
-import { initSfx, sfx } from "@/lib/sfx";
+import { SoundEffectsManager, initSfx, sfx } from "@/lib/sfx";
 import { saveResult } from "@/lib/results";
 import { useAuth } from "@/hooks/useAuth";
 import { FALLBACK_PASSAGES, getRandomPassage, type TypingPassage } from "@/lib/typingContent";
 import { generateTypingPassage } from "@/lib/gemini.functions";
+import { KeyboardShortcutsBar } from "@/components/KeyboardShortcutsBar";
 import birdImg from "@/assets/bird.png";
 
 export const Route = createFileRoute("/play")({
@@ -54,7 +55,10 @@ type Pipe = {
   passed: boolean;
 };
 
+type ParticleType = "feather" | "spark" | "shockwave" | "smoke" | "star";
+
 type Particle = {
+  type: ParticleType;
   x: number;
   y: number;
   vx: number;
@@ -63,7 +67,136 @@ type Particle = {
   size: number;
   life: number;
   maxLife: number;
+  angle?: number;
+  vAngle?: number;
+  drag?: number;
+  gravity?: number;
+  oscSpeed?: number;
+  oscAmp?: number;
+  radius?: number;
+  maxRadius?: number;
+  lineWidth?: number;
 };
+
+function spawnCollisionParticles(particles: Particle[], x: number, y: number, isFatal: boolean) {
+  // 1. Shockwave rings radiating outwards
+  particles.push({
+    type: "shockwave",
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    color: isFatal ? "#f59e0b" : "#ef4444",
+    size: 0,
+    radius: 8,
+    maxRadius: isFatal ? 160 : 75,
+    lineWidth: isFatal ? 6 : 4,
+    life: 0,
+    maxLife: isFatal ? 48 : 28,
+  });
+
+  if (isFatal) {
+    particles.push({
+      type: "shockwave",
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: "rgba(255, 255, 255, 0.9)",
+      size: 0,
+      radius: 4,
+      maxRadius: 190,
+      lineWidth: 5,
+      life: 0,
+      maxLife: 52,
+    });
+  }
+
+  // 2. Fluttering feathers with aerodynamic rotation and air sway
+  const featherCount = isFatal ? 38 : 16;
+  const featherColors = ["#f59e0b", "#fbbf24", "#ea580c", "#ef4444", "#fef08a", "#ffffff"];
+  for (let i = 0; i < featherCount; i++) {
+    const angle = (Math.PI * 2 * i) / featherCount + (Math.random() - 0.5) * 0.5;
+    const speed = isFatal ? 3.5 + Math.random() * 6.5 : 2 + Math.random() * 4.5;
+    particles.push({
+      type: "feather",
+      x: x + (Math.random() - 0.5) * 12,
+      y: y + (Math.random() - 0.5) * 12,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - (isFatal ? 3.2 : 1.5),
+      color: featherColors[Math.floor(Math.random() * featherColors.length)]!,
+      size: 4 + Math.random() * 4.5,
+      life: 0,
+      maxLife: isFatal ? 80 + Math.floor(Math.random() * 45) : 45 + Math.floor(Math.random() * 25),
+      angle: Math.random() * Math.PI * 2,
+      vAngle: (Math.random() - 0.5) * 0.22,
+      drag: 0.965,
+      gravity: 0.08 + Math.random() * 0.06,
+      oscSpeed: 0.08 + Math.random() * 0.08,
+      oscAmp: 1.2 + Math.random() * 1.5,
+    });
+  }
+
+  // 3. High-velocity impact spark streaks
+  const sparkCount = isFatal ? 32 : 18;
+  const sparkColors = ["#ffffff", "#fef08a", "#fde047", "#fdba74"];
+  for (let i = 0; i < sparkCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = isFatal ? 5.5 + Math.random() * 8 : 4 + Math.random() * 6;
+    particles.push({
+      type: "spark",
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      color: sparkColors[Math.floor(Math.random() * sparkColors.length)]!,
+      size: 1.5 + Math.random() * 2,
+      life: 0,
+      maxLife: isFatal ? 32 : 22,
+      drag: 0.94,
+    });
+  }
+
+  // 4. Soft smoke / cloud puffs
+  const smokeCount = isFatal ? 16 : 8;
+  for (let i = 0; i < smokeCount; i++) {
+    particles.push({
+      type: "smoke",
+      x: x + (Math.random() - 0.5) * 16,
+      y: y + (Math.random() - 0.5) * 16,
+      vx: (Math.random() - 0.5) * 3,
+      vy: (Math.random() - 0.5) * 3 - 0.5,
+      color: isFatal ? "rgba(254, 243, 199, 0.45)" : "rgba(254, 202, 202, 0.4)",
+      size: 8 + Math.random() * 8,
+      life: 0,
+      maxLife: isFatal ? 55 : 35,
+      drag: 0.92,
+    });
+  }
+
+  // 5. If fatal death explosion, add starlight spirit fragments
+  if (isFatal) {
+    for (let i = 0; i < 22; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2 + Math.random() * 5.5;
+      particles.push({
+        type: "star",
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: i % 2 === 0 ? "#38bdf8" : "#fef08a",
+        size: 3.5 + Math.random() * 3,
+        life: 0,
+        maxLife: 60,
+        vAngle: (Math.random() - 0.5) * 0.3,
+        angle: Math.random() * Math.PI,
+        drag: 0.96,
+        gravity: 0.04,
+      });
+    }
+  }
+}
 
 function PlayPage() {
   const navigate = useNavigate();
@@ -75,6 +208,7 @@ function PlayPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [duration, setDuration] = useState(60);
   const [phase, setPhase] = useState<"setup" | "playing" | "gameover">("setup");
+  const [isPaused, setIsPaused] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
 
   // Typing state
@@ -109,7 +243,9 @@ function PlayPage() {
     bgScroll: 0,
     groundScroll: 0,
     invulnerableFrames: 0,
-    isAlive: true,
+    isDead: false,
+    deathFrames: 0,
+    screenFlashAlpha: 0,
     lastFrameTime: 0,
     speed: 2.2,
   });
@@ -178,7 +314,7 @@ function PlayPage() {
 
   // Countdown timer
   useEffect(() => {
-    if (phase !== "playing") return;
+    if (phase !== "playing" || isPaused) return;
     const timer = window.setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -190,7 +326,7 @@ function PlayPage() {
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [phase, finishGame, lives]);
+  }, [phase, isPaused, finishGame, lives]);
 
   // Spawn pipe obstacles periodically
   const spawnPipe = useCallback((canvasWidth: number, canvasHeight: number) => {
@@ -210,7 +346,7 @@ function PlayPage() {
 
   // Main 60 FPS Canvas Game Loop
   useEffect(() => {
-    if (phase !== "playing") return;
+    if (phase === "setup") return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -221,45 +357,57 @@ function PlayPage() {
     const width = canvas.width;
     const height = canvas.height;
 
-    // Reset initial game loop variables
-    gameStateRef.current.birdY = height * 0.45;
-    gameStateRef.current.birdVy = 0;
-    gameStateRef.current.pipes = [];
-    gameStateRef.current.particles = [];
-    gameStateRef.current.invulnerableFrames = 0;
-    gameStateRef.current.speed = 2.4;
-
-    // Pre-populate initial upcoming pipe
-    spawnPipe(width + 120, height);
+    // Reset initial game loop variables if starting fresh
+    if (gameStateRef.current.pipes.length === 0) {
+      gameStateRef.current.birdY = height * 0.45;
+      gameStateRef.current.birdVy = 0;
+      gameStateRef.current.birdAngle = 0;
+      gameStateRef.current.pipes = [];
+      gameStateRef.current.particles = [];
+      gameStateRef.current.invulnerableFrames = 0;
+      gameStateRef.current.isDead = false;
+      gameStateRef.current.deathFrames = 0;
+      gameStateRef.current.screenFlashAlpha = 0;
+      gameStateRef.current.speed = 2.4;
+      spawnPipe(width + 120, height);
+    }
 
     const loop = () => {
       const g = gameStateRef.current;
 
       // 1. Gravity & Physics
-      g.birdVy += 0.24;
-      g.birdVy = Math.min(g.birdVy, 8);
-      g.birdY += g.birdVy;
-      g.birdAngle = Math.max(-28, Math.min(65, g.birdVy * 4.8));
+      if (!g.isDead) {
+        g.birdVy += 0.24;
+        g.birdVy = Math.min(g.birdVy, 8);
+        g.birdY += g.birdVy;
+        g.birdAngle = Math.max(-28, Math.min(65, g.birdVy * 4.8));
 
-      if (g.invulnerableFrames > 0) {
-        g.invulnerableFrames--;
+        if (g.invulnerableFrames > 0) {
+          g.invulnerableFrames--;
+        }
+
+        // Parallax scroll
+        g.bgScroll = (g.bgScroll + g.speed * 0.4) % width;
+        g.groundScroll = (g.groundScroll + g.speed) % 24;
+      } else {
+        // Increment death animation frame counter
+        g.deathFrames++;
+        if (g.deathFrames === 55) {
+          finishGame(0);
+        }
       }
-
-      // Parallax scroll
-      g.bgScroll = (g.bgScroll + g.speed * 0.4) % width;
-      g.groundScroll = (g.groundScroll + g.speed) % 24;
 
       // Check ceiling / ground collisions
       const birdRadius = 18;
       const groundY = height - 34;
 
-      if (g.birdY <= birdRadius) {
+      if (!g.isDead && g.birdY <= birdRadius) {
         g.birdY = birdRadius;
         g.birdVy = 0.5;
       }
 
       let hitGround = false;
-      if (g.birdY >= groundY - birdRadius) {
+      if (!g.isDead && g.birdY >= groundY - birdRadius) {
         g.birdY = groundY - birdRadius;
         hitGround = true;
       }
@@ -291,16 +439,20 @@ function PlayPage() {
       const birdX = 95;
       let collisionDetected = hitGround;
 
-      // Spawn pipes if needed
-      const lastPipe = g.pipes[g.pipes.length - 1];
-      if (!lastPipe || lastPipe.x < width - 280) {
-        spawnPipe(width, height);
+      // Spawn pipes if needed (only while playing and bird alive)
+      if (phase === "playing" && !g.isDead) {
+        const lastPipe = g.pipes[g.pipes.length - 1];
+        if (!lastPipe || lastPipe.x < width - 280) {
+          spawnPipe(width, height);
+        }
       }
 
       // Update and draw pipes
       for (let i = g.pipes.length - 1; i >= 0; i--) {
         const pipe = g.pipes[i]!;
-        pipe.x -= g.speed;
+        if (!g.isDead) {
+          pipe.x -= g.speed;
+        }
 
         // Draw Top Pipe
         ctx.save();
@@ -332,18 +484,19 @@ function PlayPage() {
         ctx.restore();
 
         // Check if bird passed pipe
-        if (!pipe.passed && pipe.x + pipe.width < birdX) {
+        if (!pipe.passed && !g.isDead && pipe.x + pipe.width < birdX) {
           pipe.passed = true;
           setPipesCleared((c) => c + 1);
-          // Spawn little clearance sparkle particles
+          // Spawn pipe clearance sparkle particles
           for (let p = 0; p < 6; p++) {
             g.particles.push({
+              type: "spark",
               x: birdX + 20,
               y: g.birdY,
               vx: (Math.random() - 0.5) * 4,
               vy: (Math.random() - 0.5) * 4,
               color: "#fde047",
-              size: Math.random() * 3.5 + 1.5,
+              size: Math.random() * 2.5 + 1.5,
               life: 0,
               maxLife: 25,
             });
@@ -351,7 +504,7 @@ function PlayPage() {
         }
 
         // Collision Check (AABB with circle margin)
-        if (birdX + birdRadius > pipe.x && birdX - birdRadius < pipe.x + pipe.width) {
+        if (!g.isDead && birdX + birdRadius > pipe.x && birdX - birdRadius < pipe.x + pipe.width) {
           if (g.birdY - birdRadius < pipe.topHeight || g.birdY + birdRadius > pipe.bottomY) {
             collisionDetected = true;
           }
@@ -363,34 +516,32 @@ function PlayPage() {
         }
       }
 
-      // Handle Collision
-      if (collisionDetected && g.invulnerableFrames === 0) {
-        g.invulnerableFrames = 70; // ~1.1s invulnerability
-        g.birdVy = -3.8; // Bounce
-        sfx.wrong();
-        setShake(true);
-        window.setTimeout(() => setShake(false), 320);
-
-        // Spawn golden and red feather collision particles
-        for (let p = 0; p < 18; p++) {
-          g.particles.push({
-            x: birdX,
-            y: g.birdY,
-            vx: (Math.random() - 0.5) * 7,
-            vy: (Math.random() - 0.7) * 7,
-            color: p % 2 === 0 ? "#ef4444" : "#fef08a",
-            size: Math.random() * 5 + 2,
-            life: 0,
-            maxLife: 35,
-          });
-        }
-
+      // Handle Collision / Death Trigger
+      if (collisionDetected && g.invulnerableFrames === 0 && !g.isDead && phase === "playing") {
         setCombo(0);
         setLives((currentLives) => {
           const next = currentLives - 1;
-          if (next <= 0) {
-            finishGame(0);
+          const isFatal = next <= 0;
+
+          if (isFatal) {
+            // FATAL BIRD DEATH
+            g.isDead = true;
+            g.deathFrames = 0;
+            g.screenFlashAlpha = 0.75;
+            sfx.gameover();
+            spawnCollisionParticles(g.particles, birdX, g.birdY, true);
+          } else {
+            // NON-FATAL COLLISION IMPACT
+            g.invulnerableFrames = 70; // ~1.1s invulnerability
+            g.birdVy = -3.8; // Bounce
+            g.screenFlashAlpha = 0.35;
+            sfx.wrong();
+            spawnCollisionParticles(g.particles, birdX, g.birdY, false);
           }
+
+          setShake(true);
+          window.setTimeout(() => setShake(false), isFatal ? 450 : 280);
+
           return Math.max(0, next);
         });
       }
@@ -412,62 +563,184 @@ function PlayPage() {
         ctx.fill();
       }
 
-      // 5. Update & Draw Particles
+      // 5. Update & Draw Particles (Canvas-based visual feedback system)
       for (let i = g.particles.length - 1; i >= 0; i--) {
         const pt = g.particles[i]!;
-        pt.x += pt.vx;
-        pt.y += pt.vy;
-        pt.vy += 0.12; // particle gravity
         pt.life++;
-        const alpha = 1 - pt.life / pt.maxLife;
+        const alpha = Math.max(0, 1 - pt.life / pt.maxLife);
 
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, alpha);
-        ctx.fillStyle = pt.color;
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+        if (pt.type === "shockwave") {
+          // Expanding shockwave ring
+          const progress = pt.life / pt.maxLife;
+          const currentRadius =
+            (pt.radius || 6) +
+            ((pt.maxRadius || 80) - (pt.radius || 6)) * Math.sin((progress * Math.PI) / 2);
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, currentRadius, 0, Math.PI * 2);
+          ctx.strokeStyle = pt.color;
+          ctx.globalAlpha = alpha * 0.85;
+          ctx.lineWidth = Math.max(1, (pt.lineWidth || 4) * (1 - progress * 0.7));
+          ctx.stroke();
+          ctx.restore();
+        } else if (pt.type === "feather") {
+          // Fluttering feather physics
+          if (pt.drag) {
+            pt.vx *= pt.drag;
+            pt.vy *= pt.drag;
+          }
+          if (pt.gravity) pt.vy += pt.gravity;
+          pt.x += pt.vx + (pt.oscAmp ? Math.sin(pt.life * (pt.oscSpeed || 0.1)) * pt.oscAmp : 0);
+          pt.y += pt.vy;
+          if (pt.vAngle && pt.angle !== undefined) pt.angle += pt.vAngle;
+
+          // Settle gently on ground
+          if (pt.y > groundY - 2) {
+            pt.y = groundY - 2;
+            pt.vx *= 0.6;
+            pt.vy = 0;
+            pt.vAngle = 0;
+          }
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.translate(pt.x, pt.y);
+          ctx.rotate(pt.angle || 0);
+
+          // Feather blade (ellipse)
+          ctx.fillStyle = pt.color;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, pt.size * 2.2, pt.size * 0.75, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Central quill shaft
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(-pt.size * 1.8, 0);
+          ctx.lineTo(pt.size * 1.8, 0);
+          ctx.stroke();
+
+          ctx.restore();
+        } else if (pt.type === "spark") {
+          // High-velocity impact spark streak
+          if (pt.drag) {
+            pt.vx *= pt.drag;
+            pt.vy *= pt.drag;
+          }
+          pt.x += pt.vx;
+          pt.y += pt.vy;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = pt.color;
+          ctx.lineWidth = pt.size;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(pt.x - pt.vx * 2.5, pt.y - pt.vy * 2.5);
+          ctx.stroke();
+          ctx.restore();
+        } else if (pt.type === "smoke") {
+          // Soft smoke / wind puff
+          if (pt.drag) {
+            pt.vx *= pt.drag;
+            pt.vy *= pt.drag;
+          }
+          pt.x += pt.vx;
+          pt.y += pt.vy;
+          pt.size += 0.35;
+
+          ctx.save();
+          ctx.globalAlpha = alpha * 0.6;
+          ctx.fillStyle = pt.color;
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else if (pt.type === "star") {
+          // 4-pointed celestial sparkle
+          if (pt.drag) {
+            pt.vx *= pt.drag;
+            pt.vy *= pt.drag;
+          }
+          if (pt.gravity) pt.vy += pt.gravity;
+          pt.x += pt.vx;
+          pt.y += pt.vy;
+          if (pt.vAngle && pt.angle !== undefined) pt.angle += pt.vAngle;
+
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.translate(pt.x, pt.y);
+          ctx.rotate(pt.angle || 0);
+          ctx.fillStyle = pt.color;
+
+          const s = pt.size;
+          ctx.beginPath();
+          ctx.moveTo(0, -s * 1.6);
+          ctx.lineTo(s * 0.4, -s * 0.4);
+          ctx.lineTo(s * 1.6, 0);
+          ctx.lineTo(s * 0.4, s * 0.4);
+          ctx.lineTo(0, s * 1.6);
+          ctx.lineTo(-s * 0.4, s * 0.4);
+          ctx.lineTo(-s * 1.6, 0);
+          ctx.lineTo(-s * 0.4, -s * 0.4);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
 
         if (pt.life >= pt.maxLife) {
           g.particles.splice(i, 1);
         }
       }
 
-      // 6. Draw Bird
-      ctx.save();
-      ctx.translate(birdX, g.birdY);
-      ctx.rotate((g.birdAngle * Math.PI) / 180);
-
-      // Invulnerability blink effect
-      if (g.invulnerableFrames > 0 && Math.floor(g.invulnerableFrames / 6) % 2 === 0) {
-        ctx.globalAlpha = 0.35;
+      // Draw screen impact flash if active
+      if (g.screenFlashAlpha > 0) {
+        ctx.save();
+        ctx.fillStyle = g.isDead ? "rgba(239, 68, 68, 0.4)" : "rgba(255, 255, 255, 0.35)";
+        ctx.globalAlpha = g.screenFlashAlpha;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+        g.screenFlashAlpha = Math.max(0, g.screenFlashAlpha - 0.035);
       }
 
-      if (birdImgRef.current && birdImgRef.current.complete) {
-        ctx.drawImage(birdImgRef.current, -26, -26, 52, 52);
-      } else {
-        // Fallback procedural aviator bird
-        ctx.fillStyle = "#f59e0b";
-        ctx.beginPath();
-        ctx.arc(0, 0, 20, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#ea580c";
-        ctx.beginPath();
-        ctx.moveTo(12, -4);
-        ctx.lineTo(24, 2);
-        ctx.lineTo(12, 8);
-        ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath();
-        ctx.arc(6, -6, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#000000";
-        ctx.beginPath();
-        ctx.arc(8, -6, 3, 0, Math.PI * 2);
-        ctx.fill();
+      // 6. Draw Bird (only if alive!)
+      if (!g.isDead) {
+        ctx.save();
+        ctx.translate(birdX, g.birdY);
+        ctx.rotate((g.birdAngle * Math.PI) / 180);
+
+        // Invulnerability blink effect
+        if (g.invulnerableFrames > 0 && Math.floor(g.invulnerableFrames / 6) % 2 === 0) {
+          ctx.globalAlpha = 0.35;
+        }
+
+        if (birdImgRef.current && birdImgRef.current.complete) {
+          ctx.drawImage(birdImgRef.current, -26, -26, 52, 52);
+        } else {
+          // Fallback procedural aviator bird
+          ctx.fillStyle = "#f59e0b";
+          ctx.beginPath();
+          ctx.arc(0, 0, 20, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ea580c";
+          ctx.beginPath();
+          ctx.moveTo(12, -4);
+          ctx.lineTo(24, 2);
+          ctx.lineTo(12, 8);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(6, -6, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#000000";
+          ctx.beginPath();
+          ctx.arc(8, -6, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
-      ctx.restore();
 
       animId = requestAnimationFrame(loop);
     };
@@ -477,20 +750,24 @@ function PlayPage() {
   }, [phase, spawnPipe, finishGame]);
 
   // Trigger bird flap upwards
-  const flapBird = useCallback(() => {
-    gameStateRef.current.birdVy = -5.5; // Upward flap impulse
+  const flapBird = useCallback((isSpaceFlap = false) => {
+    gameStateRef.current.birdVy = isSpaceFlap ? -6.2 : -5.4; // Upward flap impulse
 
     // Spawn tiny white cloud/wind puff particle behind bird
-    gameStateRef.current.particles.push({
-      x: 75,
-      y: gameStateRef.current.birdY + 10,
-      vx: -1.5,
-      vy: 1.2,
-      color: "rgba(255, 255, 255, 0.8)",
-      size: 4,
-      life: 0,
-      maxLife: 15,
-    });
+    const count = isSpaceFlap ? 3 : 1;
+    for (let i = 0; i < count; i++) {
+      gameStateRef.current.particles.push({
+        type: "smoke",
+        x: 75,
+        y: gameStateRef.current.birdY + 10 + (Math.random() - 0.5) * 8,
+        vx: -2 - Math.random(),
+        vy: 1.2 + (Math.random() - 0.5) * 2,
+        color: "rgba(255, 255, 255, 0.85)",
+        size: isSpaceFlap ? 5 : 4,
+        life: 0,
+        maxLife: 18,
+      });
+    }
   }, []);
 
   // Handle typing input
@@ -501,6 +778,13 @@ function PlayPage() {
     // Disregard non-character meta keys (Shift, Alt, Ctrl, etc.)
     if (key.length !== 1 && key !== "Backspace") return;
     e.preventDefault();
+
+    // Trigger 'wing flap' audio clip whenever the user hits the Spacebar
+    const isSpace = key === " " || e.code === "Space";
+    if (isSpace) {
+      SoundEffectsManager.playWingFlap();
+      flapBird(true);
+    }
 
     const expected = passage.text[charIndex];
 
@@ -516,8 +800,10 @@ function PlayPage() {
 
     if (key === expected) {
       // CORRECT KEY!
-      sfx.key();
-      flapBird();
+      if (!isSpace) {
+        sfx.key();
+        flapBird(false);
+      }
       setCorrectChars((c) => c + 1);
       const nextCharIndex = charIndex + 1;
       setCharIndex(nextCharIndex);
@@ -536,6 +822,7 @@ function PlayPage() {
           // Star particles
           for (let p = 0; p < 12; p++) {
             gameStateRef.current.particles.push({
+              type: "star",
               x: 100,
               y: gameStateRef.current.birdY,
               vx: (Math.random() - 0.5) * 6,
@@ -561,6 +848,10 @@ function PlayPage() {
         setTyped("");
       }
     } else {
+      // If user tapped space for a wing flap impulse mid-word, flap smoothly without punishing as a fatal typo
+      if (isSpace) {
+        return;
+      }
       // WRONG KEY!
       sfx.wrong();
       setErrors((err) => err + 1);
@@ -584,6 +875,22 @@ function PlayPage() {
     setErrors(0);
     setPassagesCompleted(0);
     setPipesCleared(0);
+
+    const canvas = canvasRef.current;
+    const height = canvas?.height || 340;
+    gameStateRef.current.birdY = height * 0.45;
+    gameStateRef.current.birdVy = 0;
+    gameStateRef.current.birdAngle = 0;
+    gameStateRef.current.isDead = false;
+    gameStateRef.current.deathFrames = 0;
+    gameStateRef.current.screenFlashAlpha = 0;
+    gameStateRef.current.invulnerableFrames = 0;
+    gameStateRef.current.particles = [];
+    gameStateRef.current.pipes = [];
+    if (canvas) {
+      spawnPipe(canvas.width + 120, height);
+    }
+
     setPhase("playing");
     sfx.start();
     window.setTimeout(() => inputRef.current?.focus(), 60);
@@ -633,7 +940,7 @@ function PlayPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <MuteButton />
+            <MuteButton variant="pill" />
             <Link to="/beginner" className="btn-ghost text-xs">
               Beginner Finger Guide →
             </Link>
@@ -849,15 +1156,23 @@ function PlayPage() {
           />
 
           {phase === "playing" && (
-            <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-              <span>Tip: Typing the correct letter flaps the wings!</span>
-              <button
-                type="button"
-                onClick={() => finishGame(lives)}
-                className="hover:text-foreground underline"
-              >
-                End flight early
-              </button>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span>
+                  💡 <strong>Spacebar</strong> triggers wing flap swoosh!
+                </span>
+                <span className="hidden sm:inline">· Letters soar through obstacles</span>
+              </span>
+              <div className="flex items-center gap-3">
+                <MuteButton variant="pill" />
+                <button
+                  type="button"
+                  onClick={() => finishGame(lives)}
+                  className="hover:text-foreground underline"
+                >
+                  End flight early
+                </button>
+              </div>
             </div>
           )}
         </div>

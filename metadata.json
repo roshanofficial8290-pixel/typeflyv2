@@ -1,6 +1,6 @@
 {
   "name": "TypeFly",
-  "description": "A playful typing practice game where typing words keeps your bird soaring with combos, hearts, live WPM, and beginner finger guide.",
+  "description": "A playful typing practice game where typing words keeps your bird soaring with particle collisions, wing-flap audio, combos, hearts, live WPM, lifetime milestone badges, and beginner finger guide.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

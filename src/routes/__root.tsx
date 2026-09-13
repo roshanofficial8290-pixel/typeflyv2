@@ -81,7 +81,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         name: "description",
         content:
-          "A playful typing practice game where typing words keeps your bird soaring with combos, hearts, live WPM, and beginner finger guide.",
+          "A playful typing practice game where typing words keeps your bird soaring with particle collisions, wing-flap audio, combos, hearts, live WPM, lifetime milestone badges, and beginner finger guide.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
